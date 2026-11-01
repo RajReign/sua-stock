@@ -38,10 +38,23 @@ def main(items, open_path, keys_path, as_at, site, summary_path):
         raise SystemExit(f"no password entry for {', '.join(missing)}; nothing published")
     tmp = tempfile.mkdtemp()
     summaries, log = [], []
+    all_items = json.load(open(items)); all_items = all_items.get("data", all_items)["items"]
+    all_open = json.load(open(open_path))
+    every = {i["sku"] for i in all_items if i.get("status") == "active" and i["name"].upper().split()[0] in {c for c, _ in SCHOOLS}}
+    for o in all_open["orders"]:
+        for l in o["lines"]:
+            if l["sku"] not in every:
+                raise SystemExit(f'open order {o["number"]} has SKU {l["sku"]}, which is not an active item of any school; nothing published')
     for code, name in SCHOOLS:
         built = os.path.join(tmp, f"{code}.html")
         summ = os.path.join(tmp, f"{code}.json")
-        log.append(run([os.path.join(HERE, "build_sheet.py"), items, code, name, as_at, built, open_path, summ]))
+        skus = {i["sku"] for i in all_items if i["name"].upper().split()[0] == code and i.get("status") == "active"}
+        mine = dict(all_open)
+        mine["orders"] = [dict(o, lines=[l for l in o["lines"] if l["sku"] in skus]) for o in all_open["orders"]]
+        mine["orders"] = [o for o in mine["orders"] if o["lines"]]
+        school_open = os.path.join(tmp, f"{code}.open.json")
+        json.dump(mine, open(school_open, "w"))
+        log.append(run([os.path.join(HERE, "build_sheet.py"), items, code, name, as_at, built, school_open, summ]))
         log.append(run([os.path.join(HERE, "lock_sheet.py"), built, keys_path, code, os.path.join(tmp, "site")]))
         s = json.load(open(summ))
         s["link"] = f"https://stock.schooluniformsaustralia.com.au/{keys[code]['path']}/"
