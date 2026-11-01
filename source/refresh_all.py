@@ -1,14 +1,16 @@
 """Weekly refresh: build and lock every school's stock sheet, and write them into the site only if all succeed.
 
 Usage: python3 source/refresh_all.py <zoho_items.json> <open.json> <keys.json> <YYYY-MM-DD> <site_dir> <summary.json>
-       <xero_invoices.json> <xero_credit_notes.json>
+       <xero_invoices.json> <xero_credit_notes.json> [recount.json]
 
 Run from anywhere; site_dir is the root of the sua-stock repository. Every school in SCHOOLS is built with
 build_sheet.py and locked with lock_sheet.py into a temporary folder first. If any school fails (no items,
 a missing stock figure, an open order line with an unknown SKU, no password entry, a template placeholder
-left unfilled, or any doubt in the Xero payments reads, see payments.py), nothing in site_dir is touched and the script exits with an error naming the school.
+left unfilled, a recount SKU that is not an active item of any school, or any doubt in the Xero payments reads, see payments.py), nothing in site_dir is touched and the script exits with an error naming the school.
 Only when all succeed are the school folders copied over their old pages. CNAME, robots.txt, index.html
 and the source folder are never touched. keys.json must never be written into site_dir.
+recount.json (optional): {"skus": [...]}, sizes waiting for a shelf count; each school's sheet shows them as not
+available and its summary lists them with the true Zoho figure (see build_sheet.py).
 """
 import json, os, shutil, subprocess, sys, tempfile
 
@@ -33,7 +35,7 @@ def run(args):
     return r.stdout
 
 
-def main(items, open_path, keys_path, as_at, site, summary_path, xero_invoices, xero_credits):
+def main(items, open_path, keys_path, as_at, site, summary_path, xero_invoices, xero_credits, recount_path=""):
     keys = json.load(open(keys_path))
     if os.path.abspath(keys_path).startswith(os.path.abspath(site) + os.sep):
         raise SystemExit("the passwords file is inside the site folder; move it out before publishing")
@@ -50,6 +52,10 @@ def main(items, open_path, keys_path, as_at, site, summary_path, xero_invoices, 
         for l in o["lines"]:
             if l["sku"] not in every:
                 raise SystemExit(f'open order {o["number"]} has SKU {l["sku"]}, which is not an active item of any school; nothing published')
+    recount = json.load(open(recount_path))["skus"] if recount_path else []
+    unknown = [k for k in recount if k not in every]
+    if unknown:
+        raise SystemExit(f"recount list has {len(unknown)} SKUs that are not active items of any school (first: {unknown[0]}); nothing published")
     for code, name in SCHOOLS:
         built = os.path.join(tmp, f"{code}.html")
         summ = os.path.join(tmp, f"{code}.json")
@@ -61,7 +67,7 @@ def main(items, open_path, keys_path, as_at, site, summary_path, xero_invoices, 
         json.dump(mine, open(school_open, "w"))
         school_pay = os.path.join(tmp, f"{code}.payments.json")
         json.dump(pays[code], open(school_pay, "w"))
-        log.append(run([os.path.join(HERE, "build_sheet.py"), items, code, name, as_at, built, school_open, summ, school_pay]))
+        log.append(run([os.path.join(HERE, "build_sheet.py"), items, code, name, as_at, built, school_open, summ, school_pay, recount_path]))
         log.append(run([os.path.join(HERE, "lock_sheet.py"), built, keys_path, code, os.path.join(tmp, "site")]))
         s = json.load(open(summ))
         s["owing"] = {"total": pays[code]["total_owing"], "invoices": len(pays[code]["invoices"]), **pays[code]["totals"]}
@@ -84,6 +90,6 @@ def main(items, open_path, keys_path, as_at, site, summary_path, xero_invoices, 
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if len(a) != 8:
+    if len(a) not in (8, 9):
         raise SystemExit(__doc__)
     main(*a)

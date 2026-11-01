@@ -1,6 +1,6 @@
 """Build one school's weekly stock sheet from a Zoho Inventory items export.
 
-Usage: python3 build_sheet.py <zoho_items.json> <SCHOOL_CODE> "<School name>" <YYYY-MM-DD> <out.html> [open.json] [summary.json] [payments.json]
+Usage: python3 build_sheet.py <zoho_items.json> <SCHOOL_CODE> "<School name>" <YYYY-MM-DD> <out.html> [open.json] [summary.json] [payments.json] [recount.json]
 
 Prices: Zoho holds selling rates ex GST; the sheet shows rate x 1.1, rounded to the cent, per size (D-90).
 Stock: physical stock on hand for each active item whose name starts with the school code, given in the
@@ -10,6 +10,8 @@ open.json (optional): {"orders": [{"number", "date", "lines": [{"sku", "qty"}]}]
 summary.json (optional): written for the weekly run: counts, sizes at zero, styles over the 150 free limit.
 payments.json (optional): this school's Payments tab, made by payments.py from Xero only (D-100). Without it
   the sheet has no Payments tab; the weekly run always passes it.
+recount.json (optional): {"skus": ["<sku>", ...]}, sizes waiting for a shelf count. Each is shown as not available
+  (stock 0, so it cannot be ordered) until counted; the summary lists them under "recount" with the true Zoho figure.
 template.html and logo-ink.svg are read from the folder this script is in.
 """
 import json, os, re, sys, base64
@@ -102,7 +104,8 @@ def price_inc(rate):
     return float((Decimal(str(rate)) * Decimal("1.1")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def build(items_path, code, school, as_at, out_path, open_path=None, summary_path=None, payments_path=None):
+def build(items_path, code, school, as_at, out_path, open_path=None, summary_path=None, payments_path=None, recount_path=None):
+    recount = set(json.load(open(recount_path))["skus"]) if recount_path else set()
     opn = json.load(open(open_path)) if open_path else {"orders": [], "incoming": {}, "incoming_when": ""}
     open_qty = {}
     for o in opn["orders"]:
@@ -117,6 +120,7 @@ def build(items_path, code, school, as_at, out_path, open_path=None, summary_pat
     missing = [i["sku"] for i in items if i.get("stock_on_hand") is None]
     if missing:
         raise SystemExit(f"{code}: no stock figure for {len(missing)} items (first: {missing[0]}); nothing built")
+    recount &= {i["sku"] for i in items}                    # refresh_all.py has already refused unknown SKUs
     garments = {}
     for i in items:
         sku = i["sku"]
@@ -130,7 +134,7 @@ def build(items_path, code, school, as_at, out_path, open_path=None, summary_pat
         ordered = open_qty.get(sku, 0)
         short = max(0, ordered - on_hand)                    # open orders draw on shelf stock first
         g["sizes"].append({"size": label, "sku": sku, "price": price_inc(i["rate"]),
-                           "on_hand": on_hand, "stock": max(0, on_hand - ordered),
+                           "on_hand": on_hand, "stock": 0 if sku in recount else max(0, on_hand - ordered),
                            "incoming_spare": max(0, opn["incoming"].get(sku, 0) - short)})
     names = {}
     for g in garments.values():
@@ -191,7 +195,10 @@ def build(items_path, code, school, as_at, out_path, open_path=None, summary_pat
     units = sum(s["stock"] for g in garments.values() for s in g["sizes"])
     zero = [{"sku": s_["sku"], "garment": f'{g["name"]} ({g["code"]})', "size": s_["size"],
              "on_hand": s_["on_hand"], "open_orders": open_qty.get(s_["sku"], 0)}
-            for g in garments.values() for s_ in g["sizes"] if s_["stock"] == 0]
+            for g in garments.values() for s_ in g["sizes"] if s_["stock"] == 0 and s_["sku"] not in recount]
+    held = [{"sku": s_["sku"], "garment": f'{g["name"]} ({g["code"]})', "size": s_["size"],
+             "zoho_on_hand": s_["on_hand"], "open_orders": open_qty.get(s_["sku"], 0)}
+            for g in garments.values() for s_ in g["sizes"] if s_["sku"] in recount]
     over = []
     for g in garments.values():
         total = sum(s_["stock"] for s_ in g["sizes"])       # the same total the sheet's storage bar shows
@@ -199,6 +206,7 @@ def build(items_path, code, school, as_at, out_path, open_path=None, summary_pat
             over.append({"garment": f'{g["name"]} ({g["code"]})', "units": total, "over": total - FREE_HOLD})
     summary = {"school_code": code, "school": school, "as_at": as_at, "items": len(items), "garments": len(garments),
                "sizes": n_sizes, "sizes_in_stock": n_stock, "units": units, "sizes_at_zero": zero,
+               "recount": held,
                "over_free_hold": sorted(over, key=lambda r: -r["over"])}
     if summary_path:
         json.dump(summary, open(summary_path, "w"), indent=1, ensure_ascii=False)
@@ -214,4 +222,4 @@ if __name__ == "__main__":
     if len(a) < 5:
         raise SystemExit(__doc__)
     build(a[0], a[1], a[2], a[3], a[4], a[5] if len(a) > 5 and a[5] else None, a[6] if len(a) > 6 and a[6] else None,
-          a[7] if len(a) > 7 else None)
+          a[7] if len(a) > 7 and a[7] else None, a[8] if len(a) > 8 and a[8] else None)
