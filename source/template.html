@@ -118,6 +118,45 @@
   .po-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
   .po-when { font-size: 14px; color: var(--slate); }
 
+
+  /* Payments tab (D-100): figures from Xero only */
+  .owing { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px; }
+  .owing .k { font-size: 12px; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--slate); }
+  .owing .k.main { color: var(--navy); }
+  .owing .big { font-size: 32px; font-weight: 700; color: var(--navy); font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .owing .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 8px; }
+  .owing .n { font-size: 13px; color: var(--slate); }
+  .box { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 18px 4px; overflow-x: auto; }
+  table.pay { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  table.pay th { text-align: left; font-size: 12px; font-weight: 600; color: var(--navy); border-bottom: 2px solid var(--navy); padding: 10px 10px 6px 0; }
+  table.pay td { padding: 12px 10px 12px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.pay .r { text-align: right; padding-right: 16px; }
+  table.pay td.r { font-weight: 600; }
+  table.pay tfoot td { font-weight: 700; color: var(--navy); border-top: 2px solid var(--navy); border-bottom: 0; }
+  table.pay td.d { white-space: nowrap; }
+  .inv { font-weight: 600; color: var(--navy); }
+  @media (max-width: 620px) {
+    .box { padding: 4px 14px; }
+    table.pay { min-width: 0; }
+    table.pay thead { display: none; }
+    table.pay, table.pay tbody, table.pay tfoot, table.pay tr, table.pay td { display: block; width: 100%; }
+    table.pay tr { padding: 12px 0; border-bottom: 1px solid var(--line); }
+    table.pay td { border: 0; padding: 3px 0; }
+    table.pay td[data-label]::before { content: attr(data-label) ': '; color: var(--slate); font-weight: 500; }
+    table.pay .r { text-align: left; padding-right: 0; }
+    table.pay tfoot tr { border-bottom: 0; border-top: 2px solid var(--navy); }
+    table.pay tfoot td { border-top: 0; }
+  }
+  .inv-note { font-size: 13px; color: var(--slate); margin-top: 3px; }
+  .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .chip.overdue { background: #FBEBEB; color: #9B1C1C; border: 1px solid var(--band-high); }
+  .chip.soon { background: #FBEFD3; color: #7A5300; border: 1px solid var(--band-mid); }
+  .chip.later { background: var(--mist); color: var(--navy); border: 1px solid #C4CCDD; }
+  .paybox { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; font-size: 15px; line-height: 1.6; }
+  .paygrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 12px; }
+  .paygrid .k { font-size: 12px; font-weight: 600; color: var(--slate); }
+  .paygrid .v { font-weight: 600; color: var(--navy); font-variant-numeric: tabular-nums; }
+
   /* Footer bar */
   footer.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--white); border-top: 1px solid var(--line); box-shadow: 0 -2px 12px rgba(0,26,74,0.07); }
   .bar-inner { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 14px; padding-bottom: 14px; }
@@ -180,6 +219,7 @@
   <div class="wrap tabs-inner" role="tablist">
     <button class="tab" role="tab" id="tab-stock" aria-controls="view-stock" aria-selected="true">Order from stock</button>
     <button class="tab" role="tab" id="tab-onorder" aria-controls="view-onorder" aria-selected="false">On order<span class="count" id="poCount"></span></button>
+    <button class="tab" role="tab" id="tab-pay" aria-controls="view-pay" aria-selected="false" hidden>Payments<span class="count" id="payCount"></span></button>
   </div>
 </nav>
 
@@ -195,6 +235,11 @@
   <section id="view-onorder" role="tabpanel" aria-labelledby="tab-onorder" hidden>
     <p class="lead">Your orders we have not delivered yet, and garments for your school on their way to our warehouse. Nothing here is counted again on the Order from stock tab.</p>
     <div id="poList"></div>
+  </section>
+
+  <section id="view-pay" role="tabpanel" aria-labelledby="tab-pay" hidden>
+    <p class="lead" id="payLead"></p>
+    <div id="payBody"></div>
   </section>
 </main>
 
@@ -326,8 +371,55 @@ document.getElementById('poList').innerHTML =
   `<h2 class="section">Your orders not yet delivered</h2>${ordHtml}` +
   `<h2 class="section">Coming from our factory</h2><p class="sub">Garments on their way to our warehouse that are not already part of your orders above.</p>${poHtml}`;
 
+/* Payments tab (D-100): this school's open invoices and unused credit, from Xero only, worked out when the sheet was built */
+const PAY = SHEET.payments;
+if (PAY) {
+  document.getElementById('tab-pay').hidden = false;
+  const inv = PAY.invoices, cr = PAY.credits;
+  document.getElementById('payCount').textContent = inv.length ? '(' + inv.length + ')' : '';
+  const payAsAt = dateText(PAY.as_at);
+  const short = d => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  const dayMonth = d => new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
+  document.getElementById('payLead').textContent = 'Invoices from SUA that are still open in our accounts, as at ' + payAsAt + '. A payment made in the last few days may still show here until it reaches our bank account and we match it.';
+  const sec = t => `<h2 class="section">${t}</h2>`;
+  let h = '';
+  if (inv.length) {
+    h += `<section class="owing" aria-label="Total owing">
+      <div><div class="k main">Total owing</div><div class="big">${fmt(PAY.total_owing)}</div><div class="n">${inv.length} invoice${inv.length === 1 ? '' : 's'}, inc GST</div></div>
+      <div><div class="k">Overdue</div><div class="v">${fmt(PAY.totals.overdue)}</div></div>
+      <div><div class="k">Due in the next 7 days</div><div class="v">${fmt(PAY.totals.soon)}</div>${PAY.next_due ? `<div class="n">next due ${esc(dayMonth(PAY.next_due))}</div>` : ''}</div>
+      <div><div class="k">Not yet due</div><div class="v">${fmt(PAY.totals.later)}</div></div>
+    </section>`;
+    h += sec('Open invoices') + `<div class="box"><table class="pay"><thead><tr><th scope="col">Invoice</th><th scope="col">Issued</th><th scope="col">Due</th><th scope="col" class="r">Amount due inc GST</th><th scope="col">Status</th></tr></thead><tbody>` +
+      inv.map(r => {
+        const parts = [];
+        if (r.credited > 0) parts.push(`less credits ${fmt(r.credited)}${r.credit_notes.length ? ' (' + r.credit_notes.map(esc).join(', ') + ')' : ''}`);
+        if (r.paid > 0) parts.push(`less paid ${fmt(r.paid)}`);
+        const note = parts.length ? `<div class="inv-note">Invoice ${fmt(r.total)} ${parts.join(' and ')}</div>` : '';
+        return `<tr><td><span class="inv">${esc(r.number)}</span>${note}</td><td class="d" data-label="Issued">${esc(short(r.issued))}</td><td class="d" data-label="Due">${esc(short(r.due))}</td><td class="r" data-label="Amount due inc GST">${fmt(r.amount_due)}</td><td><span class="chip ${esc(r.band)}">${esc(r.status)}</span></td></tr>`;
+      }).join('') +
+      `</tbody><tfoot><tr><td colspan="3">Total owing</td><td class="r">${fmt(PAY.total_owing)}</td><td></td></tr></tfoot></table></div>`;
+  } else {
+    h += `<section class="owing" aria-label="Total owing" style="display:block"><div class="k main">Total owing</div><div class="big">${fmt(0)}</div><div class="n" style="font-size:15px;margin-top:6px">Nothing is owing. Thank you.</div></section>`;
+  }
+  h += sec('Unused credit') + (cr.length
+    ? `<div class="box"><table class="pay"><thead><tr><th scope="col">Credit note</th><th scope="col">Date</th><th scope="col" class="r">Credit remaining inc GST</th></tr></thead><tbody>` +
+      cr.map(c => `<tr><td><span class="inv">${esc(c.number)}</span></td><td class="d" data-label="Date">${esc(short(c.date))}</td><td class="r" data-label="Credit remaining inc GST">${fmt(c.remaining)}</td></tr>`).join('') + `</tbody></table></div>`
+    : `<div class="empty">You have no unused credit with us.${inv.some(r => r.credited > 0) ? ' Credits already taken off an invoice are shown on that invoice above.' : ''}</div>`);
+  const P = PAY.pay_to;
+  h += sec('How to pay') + `<div class="paybox"><div class="paygrid">
+      <div><div class="k">Pay to</div><div class="v">${esc(P.name)}</div></div>
+      <div><div class="k">Bank</div><div class="v">${esc(P.bank)}</div></div>
+      <div><div class="k">BSB</div><div class="v">${esc(P.bsb)}</div></div>
+      <div><div class="k">Account number</div><div class="v">${esc(P.account)}</div></div>
+    </div>${esc(P.reference)}</div>`;
+  h += `<p class="terms">This tab shows ${esc(SHEET.school)}'s invoices only. Questions about an invoice: email us at ${esc(SHEET.order_email)}.</p>`;
+  document.getElementById('payBody').innerHTML = h;
+}
+
+
 /* Tabs */
-const tabs = [['tab-stock', 'view-stock'], ['tab-onorder', 'view-onorder']];
+const tabs = [['tab-stock', 'view-stock'], ['tab-onorder', 'view-onorder'], ['tab-pay', 'view-pay']];
 function showTab(id) {
   tabs.forEach(([t, v]) => {
     const on = t === id;

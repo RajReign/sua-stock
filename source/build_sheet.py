@@ -1,6 +1,6 @@
 """Build one school's weekly stock sheet from a Zoho Inventory items export.
 
-Usage: python3 build_sheet.py <zoho_items.json> <SCHOOL_CODE> "<School name>" <YYYY-MM-DD> <out.html> [open.json] [summary.json]
+Usage: python3 build_sheet.py <zoho_items.json> <SCHOOL_CODE> "<School name>" <YYYY-MM-DD> <out.html> [open.json] [summary.json] [payments.json]
 
 Prices: Zoho holds selling rates ex GST; the sheet shows rate x 1.1, rounded to the cent, per size (D-90).
 Stock: physical stock on hand for each active item whose name starts with the school code, given in the
@@ -8,6 +8,8 @@ Stock: physical stock on hand for each active item whose name starts with the sc
 open.json (optional): {"orders": [{"number", "date", "lines": [{"sku", "qty"}]}],   open sales orders (D-89)
                        "incoming": {"<sku>": qty}, "incoming_when": "<text>"}         open purchase orders
 summary.json (optional): written for the weekly run: counts, sizes at zero, styles over the 150 free limit.
+payments.json (optional): this school's Payments tab, made by payments.py from Xero only (D-100). Without it
+  the sheet has no Payments tab; the weekly run always passes it.
 template.html and logo-ink.svg are read from the folder this script is in.
 """
 import json, os, re, sys, base64
@@ -100,7 +102,7 @@ def price_inc(rate):
     return float((Decimal(str(rate)) * Decimal("1.1")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def build(items_path, code, school, as_at, out_path, open_path=None, summary_path=None):
+def build(items_path, code, school, as_at, out_path, open_path=None, summary_path=None, payments_path=None):
     opn = json.load(open(open_path)) if open_path else {"orders": [], "incoming": {}, "incoming_when": ""}
     open_qty = {}
     for o in opn["orders"]:
@@ -150,7 +152,13 @@ def build(items_path, code, school, as_at, out_path, open_path=None, summary_pat
                      for s in SECTION_ORDER if s in sections],
         "open_orders": [],
         "on_order": [],
+        "payments": None,
     }
+    if payments_path:
+        pay = json.load(open(payments_path))
+        if pay.get("as_at") != as_at:
+            raise SystemExit(f"{code}: payments file is for {pay.get('as_at')}, not {as_at}")
+        sheet["payments"] = pay
     by_sku = {s_["sku"]: (g, s_) for g in garments.values() for s_ in g["sizes"]}
     left = {k: v["on_hand"] for k, (g_, v) in by_sku.items()}
     for o in opn["orders"]:
@@ -205,4 +213,5 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     if len(a) < 5:
         raise SystemExit(__doc__)
-    build(a[0], a[1], a[2], a[3], a[4], a[5] if len(a) > 5 and a[5] else None, a[6] if len(a) > 6 else None)
+    build(a[0], a[1], a[2], a[3], a[4], a[5] if len(a) > 5 and a[5] else None, a[6] if len(a) > 6 and a[6] else None,
+          a[7] if len(a) > 7 else None)
