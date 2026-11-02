@@ -77,7 +77,7 @@ const toB64 = u => btoa(String.fromCharCode(...u));
 (async () => {
   let saved = null;
   try { saved = localStorage.getItem(STORE); } catch (e) {}
-  if (saved) { try { await open(b64(saved)); return; } catch (e) { try { localStorage.removeItem(STORE); } catch (e2) {} } }
+  if (saved) { if (document.readyState !== 'complete') await new Promise(r => window.addEventListener('load', r)); try { await open(b64(saved)); return; } catch (e) { try { localStorage.removeItem(STORE); } catch (e2) {} } }
   document.getElementById('pw').focus();
 })();
 document.getElementById('f').addEventListener('submit', async e => {
